@@ -91,7 +91,13 @@ class CroCoRelighting(CroCoNet):
 
         # Relight img 1 to be like img 2
         decout = self._decoder(static, pos, None, swapped_dyn, swapped_dyn_pos, return_all_blocks=return_all_blocks)
-        decout1, decout2 = decout.chunk(2, dim=0)
+        # decout1, decout2 = decout.chunk(2, dim=0)
+        if return_all_blocks:
+            decout1, decout2 = list(map(list, zip(*[o.chunk(2, dim=0) for o in decout])))
+            # decout2 = decout2[-1]
+        else:
+            decout1, decout2 = decout.chunk(2, dim=0)
+        static1, static2 = static.chunk(2, dim=0)
         # decout1 = self._decoder(static1, pos1, None, dyn2, dyn_pos2, return_all_blocks=return_all_blocks)
         # decout2 = self._decoder(static2, pos2, None, dyn1, dyn_pos1, return_all_blocks=return_all_blocks)
         return self.head(decout1, img1_info), self.head(decout2, img2_info), static1, static2
