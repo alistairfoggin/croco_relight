@@ -226,8 +226,8 @@ class PatchEmbed(nn.Module):
         
     def forward(self, x):
         B, C, H, W = x.shape
-        torch._assert(H == self.img_size[0], f"Input image height ({H}) doesn't match model ({self.img_size[0]}).")
-        torch._assert(W == self.img_size[1], f"Input image width ({W}) doesn't match model ({self.img_size[1]}).")
+        # torch._assert(H == self.img_size[0], f"Input image height ({H}) doesn't match model ({self.img_size[0]}).")
+        # torch._assert(W == self.img_size[1], f"Input image width ({W}) doesn't match model ({self.img_size[1]}).")
         x = self.proj(x)
         pos = self.position_getter(B, x.size(2), x.size(3), x.device)
         if self.flatten:

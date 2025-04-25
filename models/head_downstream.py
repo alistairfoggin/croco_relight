@@ -33,7 +33,7 @@ class PixelwiseTaskWithDPT(nn.Module):
         self.hooks_idx = hooks_idx
         self.layer_dims = layer_dims
     
-    def setup(self, croconet):
+    def setup(self, croconet, dim_tokens=None):
         dpt_args = {'output_width_ratio': self.output_width_ratio, 'num_channels': self.num_channels}
         if self.hooks_idx is None:
             if hasattr(croconet, 'dec_blocks'): # encoder + decoder 
@@ -47,7 +47,8 @@ class PixelwiseTaskWithDPT(nn.Module):
         dpt_args['hooks'] = self.hooks_idx
         dpt_args['layer_dims'] = self.layer_dims
         self.dpt = DPTOutputAdapter(**dpt_args)
-        dim_tokens = [croconet.enc_embed_dim if hook<croconet.enc_depth else croconet.dec_embed_dim for hook in self.hooks_idx]
+        if dim_tokens is None:
+            dim_tokens = [croconet.enc_embed_dim if hook<croconet.enc_depth else croconet.dec_embed_dim for hook in self.hooks_idx]
         dpt_init_args = {'dim_tokens_enc': dim_tokens}
         self.dpt.init(**dpt_init_args)
 

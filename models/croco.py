@@ -147,7 +147,7 @@ class CroCoNet(nn.Module):
             posvis = pos[~masks].view(B, -1, 2)
         else:
             B,N,C = x.size()
-            masks = torch.zeros((B,N), dtype=bool)
+            masks = torch.zeros((B,N), dtype=bool, device=x.device)
             posvis = pos
         # now apply the transformer encoder and normalization        
         if return_all_blocks:
