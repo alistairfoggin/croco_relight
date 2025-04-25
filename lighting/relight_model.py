@@ -61,13 +61,14 @@ class CroCoRelighting(CroCoNet):
         ## and now the faster version
         out, pos, _ = self._encode_image(torch.cat((img1, img2), dim=0), do_mask=False,
                                          return_all_blocks=return_all_blocks)
-        if return_all_blocks:
-            out, out2 = list(map(list, zip(*[o.chunk(2, dim=0) for o in out])))
-            out2 = out2[-1]
-        else:
-            out, out2 = out.chunk(2, dim=0)
-        pos, pos2 = pos.chunk(2, dim=0)
-        return out, out2, pos, pos2
+        return out, pos
+        # if return_all_blocks:
+        #     out, out2 = list(map(list, zip(*[o.chunk(2, dim=0) for o in out])))
+        #     out2 = out2[-1]
+        # else:
+        #     out, out2 = out.chunk(2, dim=0)
+        # pos, pos2 = pos.chunk(2, dim=0)
+        # return out, out2, pos, pos2
 
     def forward(self, img1, img2):
         B, C, H1, W1 = img1.size()
@@ -75,15 +76,26 @@ class CroCoRelighting(CroCoNet):
         img1_info = {'height': H1, 'width': W1}
         img2_info = {'height': H2, 'width': W2}
         return_all_blocks = hasattr(self.head, 'return_all_blocks') and self.head.return_all_blocks
-        feat1, feat2, pos1, pos2 = self.encode_image_pairs(img1, img2, return_all_blocks=False)
+        # feat1, feat2, pos1, pos2 = self.encode_image_pairs(img1, img2, return_all_blocks=False)
+        feat, pos = self.encode_image_pairs(img1, img2, return_all_blocks=False)
 
-        static1, dyn1, dyn_pos1 = self.lighting_extractor(feat1, pos1)
-        static2, dyn2, dyn_pos2 = self.lighting_extractor(feat2, pos2)
+        static, dyn, dyn_pos = self.lighting_extractor(feat, pos)
+        # static1, dyn1, dyn_pos1 = self.lighting_extractor(feat1, pos1)
+        # static2, dyn2, dyn_pos2 = self.lighting_extractor(feat2, pos2)
+
+        # Swap dyn1 and dyn2
+        dyn1, dyn2 = dyn.chunk(2, dim=0)
+        dyn_pos1, dyn_pos2 = dyn_pos.chunk(2, dim=0)
+        swapped_dyn = torch.cat((dyn2, dyn1), dim=0)
+        swapped_dyn_pos = torch.cat((dyn_pos2, dyn_pos1), dim=0)
 
         # Relight img 1 to be like img 2
-        decout1 = self._decoder(static1, pos1, None, dyn2, dyn_pos2, return_all_blocks=return_all_blocks)
-        decout2 = self._decoder(static2, pos2, None, dyn1, dyn_pos1, return_all_blocks=return_all_blocks)
+        decout = self._decoder(static, pos, None, swapped_dyn, swapped_dyn_pos, return_all_blocks=return_all_blocks)
+        decout1, decout2 = decout.chunk(2, dim=0)
+        # decout1 = self._decoder(static1, pos1, None, dyn2, dyn_pos2, return_all_blocks=return_all_blocks)
+        # decout2 = self._decoder(static2, pos2, None, dyn1, dyn_pos1, return_all_blocks=return_all_blocks)
         return self.head(decout1, img1_info), self.head(decout2, img2_info), static1, static2
+
 
 if __name__ == "__main__":
     device = torch.device('cuda:0' if torch.cuda.is_available() and torch.cuda.device_count() > 0 else 'cpu')
@@ -134,28 +146,28 @@ if __name__ == "__main__":
                 # f" Reconstruction loss: {loss_reconstruction.item()}," +
                 f" Static Latent Loss: {loss_static_latents.item()}")
 
-        res = 448
-        if epoch % 30 == 0:
-            # with torch.no_grad():
-            #     img1 = transforms.Resize(res)(img1)
-            #     img2 = transforms.Resize(res)(img2)
-            #     img1_relit, img2_relit, _, _ = croco(img1, img2)
-            out_img = np.zeros((res * 2, res * 3, 3))
-            # 0 0: img2 relit to match img1
-            out_img[:res, :res, :] = img2_relit[0].permute(1, 2, 0).detach().cpu().numpy()
-            # 0 1: img1 reconstruction
-            # out_img[:res, res:2 * res, :] = img1_recon[0].permute(1, 2, 0).detach().cpu().numpy()
-            # 0 2: img1 gt
-            out_img[:res, 2 * res:, :] = img1[0].permute(1, 2, 0).detach().cpu().numpy()
-            # 1 0: img1 relit to match img2
-            out_img[res:, :res, :] = img1_relit[0].permute(1, 2, 0).detach().cpu().numpy()
-            # 1 1: img2 reconstruction
-            # out_img[res:, res:2 * res, :] = img2_recon[0].permute(1, 2, 0).detach().cpu().numpy()
-            # 1 2: img2 gt
-            out_img[res:, 2 * res:, :] = img2[0].permute(1, 2, 0).detach().cpu().numpy()
-            out_img = out_img * np.array(img_std).reshape((1, 1, -1)) + np.array(img_mean).reshape((1, 1, -1))
-            plt.imshow(out_img)
-            plt.show()
+        # res = 448
+        # if epoch % 30 == 0:
+        #     # with torch.no_grad():
+        #     #     img1 = transforms.Resize(res)(img1)
+        #     #     img2 = transforms.Resize(res)(img2)
+        #     #     img1_relit, img2_relit, _, _ = croco(img1, img2)
+        #     out_img = np.zeros((res * 2, res * 3, 3))
+        #     # 0 0: img2 relit to match img1
+        #     out_img[:res, :res, :] = img2_relit[0].permute(1, 2, 0).detach().cpu().numpy()
+        #     # 0 1: img1 reconstruction
+        #     # out_img[:res, res:2 * res, :] = img1_recon[0].permute(1, 2, 0).detach().cpu().numpy()
+        #     # 0 2: img1 gt
+        #     out_img[:res, 2 * res:, :] = img1[0].permute(1, 2, 0).detach().cpu().numpy()
+        #     # 1 0: img1 relit to match img2
+        #     out_img[res:, :res, :] = img1_relit[0].permute(1, 2, 0).detach().cpu().numpy()
+        #     # 1 1: img2 reconstruction
+        #     # out_img[res:, res:2 * res, :] = img2_recon[0].permute(1, 2, 0).detach().cpu().numpy()
+        #     # 1 2: img2 gt
+        #     out_img[res:, 2 * res:, :] = img2[0].permute(1, 2, 0).detach().cpu().numpy()
+        #     out_img = out_img * np.array(img_std).reshape((1, 1, -1)) + np.array(img_mean).reshape((1, 1, -1))
+        #     plt.imshow(out_img)
+        #     plt.show()
 
     torch.save(croco.state_dict(), "models/croco_relight2.pth")
     # torch.save(lighting_decoder.state_dict(), "models/decoder_dpt.pth")
