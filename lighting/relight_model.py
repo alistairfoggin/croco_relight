@@ -2,12 +2,13 @@ from functools import partial
 
 import numpy as np
 import torch
+from equilib import Equi2Pers
 from matplotlib import pyplot as plt
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 
 import torchvision.transforms.v2 as transforms
-from lighting.dataloader import BigTimeDataset
+from lighting.dataloader import BigTimeDataset, BigTime360Dataset
 from lighting.relight import LightingExtractor, ssim_l1_loss_fn, img_mean, img_std
 from models.croco import CroCoNet
 from models.head_downstream import PixelwiseTaskWithDPT
@@ -109,28 +110,53 @@ if __name__ == "__main__":
     croco = CroCoRelighting(**ckpt.get('croco_kwargs', {}), pretrained_model=ckpt['model']).to(device)
     croco_optim = torch.optim.Adam(croco.parameters(), lr=0.0001)
 
-    root_dir = "../../bigtime/phoenix/S6/zl548/AMOS/BigTime_v1/"  # replace with your directory path
+    root_dir1 = "../../bigtime/phoenix/S6/zl548/AMOS/BigTime_v1/"  # replace with your directory path
+    root_dir2 = "../../time360/result/"  # replace with your directory path
 
-    transform = transforms.Compose([
+    base_transform = transforms.Compose([
         transforms.ToImage(),
-        transforms.Resize(512),
-        transforms.CenterCrop(224*2),
         transforms.ColorJitter(0.2, 0.2, 0.2, 0.05),
         transforms.ToDtype(torch.float32, scale=True),
         transforms.Normalize(mean=img_mean, std=img_std),
     ])
+    extra_transform = transforms.Compose([
+        transforms.Resize(512),
+        transforms.CenterCrop(448),
+    ])
+    transform = transforms.Compose([base_transform, extra_transform])
 
-    dataset = BigTimeDataset(root_dir, transform=transform)
-    dataloader = DataLoader(dataset, batch_size=2, shuffle=True)
+    dataset1 = BigTimeDataset(root_dir1, transform=transform, device=device)
+    dataset2 = BigTime360Dataset(root_dir2, resolution=(448, 448), base_transform=base_transform, device=device)
+    dataset = ConcatDataset([dataset1, dataset2])
+    batch_size = 2
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     latent_loss_fn = nn.MSELoss()
     img_loss_fn = ssim_l1_loss_fn(0.2, True)
 
+    # equi2pers = Equi2Pers(
+    #     height=224,
+    #     width=224,
+    #     fov_x=80.0,
+    #     mode="bilinear",
+    # )
     for epoch in range(10_000):
-        batch = next(iter(dataloader)).to(device)
+        batch = next(iter(dataloader))#.to(device)
+        # pitches = torch.randn(batch_size) * np.pi/10
+        # yaws = torch.rand(batch_size) * 2 * np.pi
+        # rots = [{
+        #     'roll': 0.,
+        #     'pitch': pitches[i],  # rotate vertical
+        #     'yaw': yaws[i],  # rotate horizontal
+        # } for i in range(batch_size)]
+
+        # obtain perspective image
 
         img1 = batch[:, 0]
         img2 = batch[:, 1]
+
+        # img1 = equi2pers(equi=img1,rots=rots)
+        # img2 = equi2pers(equi=img2,rots=rots)
 
         croco_optim.zero_grad()
 
@@ -152,28 +178,28 @@ if __name__ == "__main__":
                 # f" Reconstruction loss: {loss_reconstruction.item()}," +
                 f" Static Latent Loss: {loss_static_latents.item()}")
 
-        # res = 448
-        # if epoch % 30 == 0:
-        #     # with torch.no_grad():
-        #     #     img1 = transforms.Resize(res)(img1)
-        #     #     img2 = transforms.Resize(res)(img2)
-        #     #     img1_relit, img2_relit, _, _ = croco(img1, img2)
-        #     out_img = np.zeros((res * 2, res * 3, 3))
-        #     # 0 0: img2 relit to match img1
-        #     out_img[:res, :res, :] = img2_relit[0].permute(1, 2, 0).detach().cpu().numpy()
-        #     # 0 1: img1 reconstruction
-        #     # out_img[:res, res:2 * res, :] = img1_recon[0].permute(1, 2, 0).detach().cpu().numpy()
-        #     # 0 2: img1 gt
-        #     out_img[:res, 2 * res:, :] = img1[0].permute(1, 2, 0).detach().cpu().numpy()
-        #     # 1 0: img1 relit to match img2
-        #     out_img[res:, :res, :] = img1_relit[0].permute(1, 2, 0).detach().cpu().numpy()
-        #     # 1 1: img2 reconstruction
-        #     # out_img[res:, res:2 * res, :] = img2_recon[0].permute(1, 2, 0).detach().cpu().numpy()
-        #     # 1 2: img2 gt
-        #     out_img[res:, 2 * res:, :] = img2[0].permute(1, 2, 0).detach().cpu().numpy()
-        #     out_img = out_img * np.array(img_std).reshape((1, 1, -1)) + np.array(img_mean).reshape((1, 1, -1))
-        #     plt.imshow(out_img)
-        #     plt.show()
+        res = 448
+        if epoch % 30 == 0:
+            # with torch.no_grad():
+            #     img1 = transforms.Resize(res)(img1)
+            #     img2 = transforms.Resize(res)(img2)
+            #     img1_relit, img2_relit, _, _ = croco(img1, img2)
+            out_img = np.zeros((res * 2, res * 3, 3))
+            # 0 0: img2 relit to match img1
+            out_img[:res, :res, :] = img2_relit[0].permute(1, 2, 0).detach().cpu().numpy()
+            # 0 1: img1 reconstruction
+            # out_img[:res, res:2 * res, :] = img1_recon[0].permute(1, 2, 0).detach().cpu().numpy()
+            # 0 2: img1 gt
+            out_img[:res, 2 * res:, :] = img1[0].permute(1, 2, 0).detach().cpu().numpy()
+            # 1 0: img1 relit to match img2
+            out_img[res:, :res, :] = img1_relit[0].permute(1, 2, 0).detach().cpu().numpy()
+            # 1 1: img2 reconstruction
+            # out_img[res:, res:2 * res, :] = img2_recon[0].permute(1, 2, 0).detach().cpu().numpy()
+            # 1 2: img2 gt
+            out_img[res:, 2 * res:, :] = img2[0].permute(1, 2, 0).detach().cpu().numpy()
+            out_img = out_img * np.array(img_std).reshape((1, 1, -1)) + np.array(img_mean).reshape((1, 1, -1))
+            plt.imshow(out_img)
+            plt.show()
 
     torch.save(croco.state_dict(), "models/croco_relight2.pth")
     # torch.save(lighting_decoder.state_dict(), "models/decoder_dpt.pth")
