@@ -21,7 +21,7 @@ class LightingExtractor(nn.Module):
                  lighting_feature_ratio=1, rope=None):
         super(LightingExtractor, self).__init__()
         # B x num_tokens x patch_size
-        self.dynamic_token = nn.Parameter(torch.rand((1, lighting_feature_ratio, patch_size)), requires_grad=True)
+        self.dynamic_token = nn.Parameter(torch.randn((1, lighting_feature_ratio, patch_size)), requires_grad=True)
         self.base_blocks = nn.ModuleList()
         for _ in range(3):
             self.base_blocks.append(
