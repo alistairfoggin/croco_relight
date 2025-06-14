@@ -17,13 +17,13 @@ from models.pos_embed import get_2d_sincos_pos_embed
 
 
 class LightingExtractor(nn.Module):
-    def __init__(self, patch_size=1024, num_heads=16, mlp_ratio=2, norm_layer=partial(nn.LayerNorm, eps=1e-6),
+    def __init__(self, patch_size=1024, num_heads=16, mlp_ratio=2, extractor_depth=2, norm_layer=partial(nn.LayerNorm, eps=1e-6),
                  lighting_feature_ratio=1, rope=None):
         super(LightingExtractor, self).__init__()
         # B x num_tokens x patch_size
         self.dynamic_token = nn.Parameter(torch.randn((1, lighting_feature_ratio, patch_size)), requires_grad=True)
         self.base_blocks = nn.ModuleList()
-        for _ in range(3):
+        for _ in range(extractor_depth):
             self.base_blocks.append(
                 Block(patch_size, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer, rope=rope))
 
