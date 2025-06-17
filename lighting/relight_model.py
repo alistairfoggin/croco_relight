@@ -34,6 +34,10 @@ class CroCoRelighting(CroCoNet):
         head.setup(self, dim_tokens=self.enc_embed_dim)
         self.head = head
 
+    def setup(self):
+        self._set_decoder(self.enc_embed_dim, self.enc_embed_dim, 16, 4, 2, partial(nn.LayerNorm, eps=1e-6), False)
+        self.lighting_extractor = LightingExtractor(patch_size=self.enc_embed_dim, extractor_depth=4, rope=self.rope)
+
     def freeze_encoder(self):
         self.enc_blocks.requires_grad_(False)
         self.patch_embed.requires_grad_(False)
@@ -125,18 +129,22 @@ class CroCoRelighting(CroCoNet):
 
         # Relight img 1 to be like img 2
         relit_feat = self._decoder(static, pos, None, swapped_dyn, dyn_pos, return_all_blocks=False)
+        recon_feat = self._decoder(static, pos, None, dyn, dyn_pos, return_all_blocks=False)
         # zero_feat = self._decoder(static, pos, None, zero_dyn, dyn_pos, return_all_blocks=False)
 
-        decout = self._mono_decoder(relit_feat, pos, return_all_blocks=True)
+        recon_decout = self._mono_decoder(recon_feat, pos, return_all_blocks=True)
+        relit_decout = self._mono_decoder(relit_feat, pos, return_all_blocks=True)
         # zero_decout = self._mono_decoder(zero_feat, pos, return_all_blocks=True)
 
-        decout1, decout2 = list(map(list, zip(*[o.chunk(2, dim=0) for o in decout])))
+        recon_decout1, recon_decout2 = list(map(list, zip(*[o.chunk(2, dim=0) for o in recon_decout])))
+        relit_decout1, relit_decout2 = list(map(list, zip(*[o.chunk(2, dim=0) for o in relit_decout])))
         # zero_decout1, zero_decout2 = list(map(list, zip(*[o.chunk(2, dim=0) for o in zero_decout])))
         static1, static2 = static.chunk(2, dim=0)
 
         relit_feat1, relit_feat2 = relit_feat.chunk(2, dim=0)
-        new_feat = torch.cat((relit_feat1, relit_feat2), dim=0)
+        new_feat = torch.cat((relit_feat2, relit_feat1), dim=0)
 
-        return (self.head(decout1, img1_info), self.head(decout2, img2_info),
-                static1, static2, feat, new_feat)
+        return (self.head(relit_decout1, img1_info), self.head(relit_decout2, img2_info),
+                static1, static2, feat, new_feat,
+                self.head(recon_decout1, img1_info), self.head(recon_decout2, img2_info))
                 # self.head(zero_decout1, img1_info), self.head(zero_decout2, img2_info))

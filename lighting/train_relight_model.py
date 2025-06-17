@@ -13,10 +13,12 @@ from lighting.relight_model import CroCoRelighting
 if __name__ == "__main__":
     device = torch.device('cuda:0' if torch.cuda.is_available() and torch.cuda.device_count() > 0 else 'cpu')
     ckpt = torch.load('pretrained_models/CroCo_V2_ViTLarge_BaseDecoder.pth', 'cpu')
-    croco_relight = CroCoRelighting(**ckpt.get('croco_kwargs', {}), pretrained_model=ckpt['model']).to(device)
+    croco_relight = CroCoRelighting(**ckpt.get('croco_kwargs', {}), pretrained_model=ckpt['model'])
     relight_ckpt = torch.load('lighting/models/croco_relight_pretrained.pth', 'cpu')
     croco_relight.load_state_dict(relight_ckpt)
     croco_relight.freeze_output_decoder()
+    croco_relight.setup()
+    croco_relight = croco_relight.to(device)
     croco_optim = torch.optim.Adam(croco_relight.parameters(), lr=0.0001)
 
     root_dir1 = "../bigtime/phoenix/S6/zl548/AMOS/BigTime_v1/"
@@ -42,7 +44,7 @@ if __name__ == "__main__":
     dataset_360 = PreloadedBigTimeDataset(root_dir2, internal_folder=None, transform=None)
     # dataset_360 = BigTimeDataset(root_dir2, internal_folder=None, transform=equirect_transform)
     # dataset = ConcatDataset([dataset1, dataset2])
-    batch_size = 16
+    batch_size = 8
     dataloader = DataLoader(dataset_360, batch_size=batch_size, shuffle=True, num_workers=0)
 
     latent_loss_fn = nn.MSELoss()
@@ -50,7 +52,7 @@ if __name__ == "__main__":
 
     for epoch in range(300):
         for i, batch in enumerate(dataloader):
-            batch = project_imgs(batch, resolution=(224, 224)).to(device)
+            batch = project_imgs(batch.to(device), resolution=(224, 224))
 
             # obtain perspective image
 
@@ -63,15 +65,17 @@ if __name__ == "__main__":
             croco_optim.zero_grad()
 
             # Accidentally decoded using feat1 and feat2 instead of static1 and static2. I'm an idiot lol
-            img1_relit, img2_relit, static1, static2, pre_latent, post_latent = croco_relight(img1, img2)
+            img1_relit, img2_relit, static1, static2, pre_latent, post_latent, img1_recon, img2_recon = croco_relight(img1, img2)
             # _, _, delit_static1, delit_static2, _, _ = croco_relight(img1_delit, img2_delit)
 
-            loss_relight = img_loss_fn(img1_relit, img2) + img_loss_fn(img2_relit, img1)
+            loss_relight = img_loss_fn(img1_relit, img2) + img_loss_fn(img2_relit, img1) + 0.5 * (img_loss_fn(img1_recon, img1) + img_loss_fn(img2_recon, img2))
             # loss_delight = img_loss_fn(img1_delit, img2_delit)
             # loss_reconstruction = img_loss_fn(img1_recon, img1) + img_loss_fn(img2_recon, img2)
-            loss_static_latents = latent_loss_fn(static1, static2) + latent_loss_fn(pre_latent, post_latent) #+ latent_loss_fn(delit_static1, static1.detach()) + latent_loss_fn(delit_static2, static2.detach())
+            loss_static_latents = latent_loss_fn(static1, static2) #+ latent_loss_fn(pre_latent, post_latent) #+ latent_loss_fn(delit_static1, static1.detach()) + latent_loss_fn(delit_static2, static2.detach())
 
-            loss = loss_relight + 0.5 * loss_static_latents #+ 0.2 * loss_delight
+            loss = loss_relight #+ 0.1 * loss_static_latents + 0.1 * latent_loss_fn(pre_latent.detach(), post_latent) #+ 0.2 * loss_delight
+            # loss = loss_static_latents #+ 0.2 * loss_delight
+            # loss = latent_loss_fn(pre_latent.detach(), post_latent)
             loss.backward()
             croco_optim.step()
 
