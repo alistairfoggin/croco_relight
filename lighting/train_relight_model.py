@@ -17,7 +17,7 @@ if __name__ == "__main__":
     decode_ckpt = torch.load('lighting/models/croco_relight_pretrained.pth', 'cpu')
     croco_decode.load_state_dict(decode_ckpt)
     croco_relight = RelightModule(croco_decode).to(device)
-    croco_optim = torch.optim.Adam(croco_relight.parameters(), lr=0.001)
+    croco_optim = torch.optim.Adam(croco_relight.parameters(), lr=0.0001)
 
     root_dir1 = "../bigtime/phoenix/S6/zl548/AMOS/BigTime_v1/"
     root_dir2 = "../time360/result/"
@@ -105,5 +105,5 @@ if __name__ == "__main__":
                 plt.imshow(out_img)
                 plt.show()
 
-    torch.save(croco_relight.state_dict(), "lighting/models/croco_relight_delight_from_pretrain.pth")
+    torch.save(croco_relight.state_dict(), "lighting/models/croco_relight_delight_from_pretrain2.pth")
     # torch.save(lighting_decoder.state_dict(), "models/decoder_dpt.pth")

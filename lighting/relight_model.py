@@ -10,25 +10,9 @@ from models.head_downstream import PixelwiseTaskWithDPT
 
 
 class CroCoDecode(CroCoNet):
-
-    def __init__(self, pretrained_model=None, **kwargs):
-        """ Build network for binocular downstream task
-        It takes an extra argument head, that is called with the features
-          and a dictionary img_info containing 'width' and 'height' keys
-        The head is setup with the croconet arguments in this init function
-        """
-        super(CroCoDecode, self).__init__(**kwargs)
-        if pretrained_model is not None:
-            self.load_state_dict(pretrained_model, strict=True)
-            # Reset decoder and freeze encoder
-            self.freeze_encoder()
-            self.mask_token = None
-            self.prediction_head = None
+    def setup(self):
+        self.freeze_encoder()
         self._set_mono_decoder(self.enc_embed_dim, self.enc_embed_dim, 16, 4, 2, partial(nn.LayerNorm, eps=1e-6))
-        # regular decoder is now lighting mixer
-        self._set_decoder(self.enc_embed_dim, self.enc_embed_dim, 16, 2, 2, partial(nn.LayerNorm, eps=1e-6), False)
-
-        self.lighting_extractor = LightingExtractor(patch_size=self.enc_embed_dim, rope=self.rope)
         hooks_idx = [3, 2, 1, 0]
         head = PixelwiseTaskWithDPT(hooks_idx=hooks_idx, num_channels=3)
         head.setup(self, dim_tokens=self.enc_embed_dim)
@@ -121,7 +105,7 @@ class RelightModule(nn.Module):
         swapped_dyn = torch.cat((dyn2, dyn1), dim=0)
 
         # Relight img 1 to be like img 2
-        relit_feat, _ = self.lighting_entangler(static, pos, swapped_dyn, dyn_pos)
+        relit_feat = self.lighting_entangler(static, pos, swapped_dyn, dyn_pos)
         # recon_feat = self.lighting_entangler(static, pos, dyn, dyn_pos)
 
         # recon_img = self.croco.decode(recon_feat, pos, img1_info)

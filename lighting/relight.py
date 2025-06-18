@@ -57,15 +57,17 @@ class LightingEntangler(nn.Module):
                 Block(patch_size, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer, rope=rope))
 
     def forward(self, x, xpos, dyn, dyn_pos):
+        # x = x + dyn
         x = torch.cat((x, dyn.expand(x.shape[0], 1, dyn.shape[2])), dim=1)
         xpos_extra = torch.cat((xpos, dyn_pos), dim=1)
         for blk in self.base_blocks:
             x = blk(x, xpos_extra)
+        # return x
         # static: [B, 196, 1024]
         static = x[:, :-1, :]
         # dynamic: [B, 1, 1024]
         dynamic = x[:, -1:, :]
-        return static, dynamic
+        return static#, dynamic
 
 
 class LightingBlock(nn.Module):
