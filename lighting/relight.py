@@ -48,6 +48,26 @@ class LightingExtractor(nn.Module):
         return static, dynamic, dyn_pos
 
 
+class LightingEntangler(nn.Module):
+    def __init__(self, patch_size=1024, num_heads=16, mlp_ratio=2, extractor_depth=2, norm_layer=partial(nn.LayerNorm, eps=1e-6), rope=None):
+        super(LightingEntangler, self).__init__()
+        self.base_blocks = nn.ModuleList()
+        for _ in range(extractor_depth):
+            self.base_blocks.append(
+                Block(patch_size, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer, rope=rope))
+
+    def forward(self, x, xpos, dyn, dyn_pos):
+        x = torch.cat((x, dyn.expand(x.shape[0], 1, dyn.shape[2])), dim=1)
+        xpos_extra = torch.cat((xpos, dyn_pos), dim=1)
+        for blk in self.base_blocks:
+            x = blk(x, xpos_extra)
+        # static: [B, 196, 1024]
+        static = x[:, :-1, :]
+        # dynamic: [B, 1, 1024]
+        dynamic = x[:, -1:, :]
+        return static, dynamic
+
+
 class LightingBlock(nn.Module):
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0.,
                  drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, rope=None):

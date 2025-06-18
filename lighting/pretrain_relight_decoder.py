@@ -10,7 +10,7 @@ from torchvision.datasets import ImageNet
 from torchvision.utils import make_grid
 
 from lighting.relight import img_mean, img_std, ssim_l1_loss_fn
-from lighting.relight_model import CroCoRelighting
+from lighting.relight_model import CroCoDecode
 
 def show(imgs):
     if not isinstance(imgs, list):
@@ -35,7 +35,7 @@ if __name__ == "__main__":
 
     device = torch.device('cuda:0' if torch.cuda.is_available() and torch.cuda.device_count() > 0 else 'cpu')
     ckpt = torch.load('pretrained_models/CroCo_V2_ViTLarge_BaseDecoder.pth', 'cpu')
-    croco = CroCoRelighting(**ckpt.get('croco_kwargs', {}), pretrained_model=ckpt['model']).to(device)
+    croco = CroCoDecode(**ckpt.get('croco_kwargs', {}), pretrained_model=ckpt['model']).to(device)
     croco_optim = torch.optim.Adam(croco.parameters(), lr=lr)
 
     transform = transforms.Compose([

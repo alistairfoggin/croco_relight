@@ -3,13 +3,13 @@ from functools import partial
 import torch
 from torch import nn
 
-from lighting.relight import LightingExtractor
+from lighting.relight import LightingExtractor, LightingEntangler
 from models.blocks import Block
 from models.croco import CroCoNet
 from models.head_downstream import PixelwiseTaskWithDPT
 
 
-class CroCoRelighting(CroCoNet):
+class CroCoDecode(CroCoNet):
 
     def __init__(self, pretrained_model=None, **kwargs):
         """ Build network for binocular downstream task
@@ -17,7 +17,7 @@ class CroCoRelighting(CroCoNet):
           and a dictionary img_info containing 'width' and 'height' keys
         The head is setup with the croconet arguments in this init function
         """
-        super(CroCoRelighting, self).__init__(**kwargs)
+        super(CroCoDecode, self).__init__(**kwargs)
         if pretrained_model is not None:
             self.load_state_dict(pretrained_model, strict=True)
             # Reset decoder and freeze encoder
@@ -34,20 +34,10 @@ class CroCoRelighting(CroCoNet):
         head.setup(self, dim_tokens=self.enc_embed_dim)
         self.head = head
 
-    def setup(self):
-        self._set_decoder(self.enc_embed_dim, self.enc_embed_dim, 16, 4, 2, partial(nn.LayerNorm, eps=1e-6), False)
-        self.lighting_extractor = LightingExtractor(patch_size=self.enc_embed_dim, extractor_depth=4, rope=self.rope)
-
     def freeze_encoder(self):
         self.enc_blocks.requires_grad_(False)
         self.patch_embed.requires_grad_(False)
         self.enc_norm.requires_grad_(False)
-
-    def freeze_output_decoder(self):
-        self.out_decoder_embed.requires_grad_(False)
-        self.out_dec_blocks.requires_grad_(False)
-        self.out_dec_norm.requires_grad_(False)
-        self.head.requires_grad_(False)
 
     def _set_mono_decoder(self, enc_embed_dim, dec_embed_dim, dec_num_heads, dec_depth, mlp_ratio, norm_layer):
         self.out_dec_depth = dec_depth
@@ -87,15 +77,6 @@ class CroCoRelighting(CroCoNet):
         """ No mask generator """
         return
 
-    # def _set_mask_token(self, *args, **kwargs):
-    #     """ No mask token """
-    #     self.mask_token = None
-    #     return
-    #
-    # def _set_prediction_head(self, *args, **kwargs):
-    #     """ No prediction head for downstream tasks, define your own head """
-    #     return
-
     def encode_image_pairs(self, img1, img2, return_all_blocks=False):
         """ run encoder for a pair of images
             it is actually ~5% faster to concatenate the images along the batch dimension
@@ -105,46 +86,55 @@ class CroCoRelighting(CroCoNet):
                                          return_all_blocks=return_all_blocks)
         return out, pos
 
-    def forward_enc_dec(self, img):
+    def encode_decode(self, img):
         _, _, H, W = img.size()
         img_info = {'height': H, 'width': W}
         latents, pos, _ = self._encode_image(img, do_mask=False, return_all_blocks=False)
         decout = self._mono_decoder(latents, pos, return_all_blocks=True)
         return self.head(decout, img_info)
 
+    def decode(self, latents, pos, img_info):
+        decout = self._mono_decoder(latents, pos, return_all_blocks=True)
+        return self.head(decout, img_info)
+
+
+class RelightModule(nn.Module):
+    def __init__(self, croco: CroCoNet):
+        super(RelightModule, self).__init__()
+        self.croco = croco
+        self.croco.requires_grad_(False)
+        self.lighting_extractor = LightingExtractor(patch_size=croco.enc_embed_dim, extractor_depth=3, rope=croco.rope)
+        self.lighting_entangler = LightingEntangler(patch_size=croco.enc_embed_dim, extractor_depth=3, rope=croco.rope)
+        
+
     def forward(self, img1, img2):
         B, C, H1, W1 = img1.size()
         _, _, H2, W2 = img2.size()
         img1_info = {'height': H1, 'width': W1}
         img2_info = {'height': H2, 'width': W2}
-        feat, pos = self.encode_image_pairs(img1, img2, return_all_blocks=False)
+        feat, pos = self.croco.encode_image_pairs(img1, img2, return_all_blocks=False)
 
         static, dyn, dyn_pos = self.lighting_extractor(feat, pos)
 
         # Swap dyn1 and dyn2
         dyn1, dyn2 = dyn.chunk(2, dim=0)
-        # dyn_pos1, dyn_pos2 = dyn_pos.chunk(2, dim=0)
         swapped_dyn = torch.cat((dyn2, dyn1), dim=0)
-        # zero_dyn = torch.zeros_like(swapped_dyn, device=swapped_dyn.device)
 
         # Relight img 1 to be like img 2
-        relit_feat = self._decoder(static, pos, None, swapped_dyn, dyn_pos, return_all_blocks=False)
-        recon_feat = self._decoder(static, pos, None, dyn, dyn_pos, return_all_blocks=False)
-        # zero_feat = self._decoder(static, pos, None, zero_dyn, dyn_pos, return_all_blocks=False)
+        relit_feat, _ = self.lighting_entangler(static, pos, swapped_dyn, dyn_pos)
+        # recon_feat = self.lighting_entangler(static, pos, dyn, dyn_pos)
 
-        recon_decout = self._mono_decoder(recon_feat, pos, return_all_blocks=True)
-        relit_decout = self._mono_decoder(relit_feat, pos, return_all_blocks=True)
-        # zero_decout = self._mono_decoder(zero_feat, pos, return_all_blocks=True)
+        # recon_img = self.croco.decode(recon_feat, pos, img1_info)
+        relit_img = self.croco.decode(relit_feat, pos, img2_info)
 
-        recon_decout1, recon_decout2 = list(map(list, zip(*[o.chunk(2, dim=0) for o in recon_decout])))
-        relit_decout1, relit_decout2 = list(map(list, zip(*[o.chunk(2, dim=0) for o in relit_decout])))
-        # zero_decout1, zero_decout2 = list(map(list, zip(*[o.chunk(2, dim=0) for o in zero_decout])))
+        # recon_img1, recon_img2 = recon_img.chunk(2, dim=0)
+        relit_img1, relit_img2 = relit_img.chunk(2, dim=0)
+
         static1, static2 = static.chunk(2, dim=0)
 
-        relit_feat1, relit_feat2 = relit_feat.chunk(2, dim=0)
-        new_feat = torch.cat((relit_feat2, relit_feat1), dim=0)
+        # relit_feat1, relit_feat2 = relit_feat.chunk(2, dim=0)
+        # new_feat = torch.cat((relit_feat2, relit_feat1), dim=0)
 
-        return (self.head(relit_decout1, img1_info), self.head(relit_decout2, img2_info),
-                static1, static2, feat, new_feat,
-                self.head(recon_decout1, img1_info), self.head(recon_decout2, img2_info))
-                # self.head(zero_decout1, img1_info), self.head(zero_decout2, img2_info))
+        return (relit_img1, relit_img2,
+                static1, static2)#, feat, new_feat,
+                # recon_img1, recon_img2)
